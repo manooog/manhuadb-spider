@@ -6,13 +6,16 @@ let sharedPage: Page;
 
 export const loadUrl = async (url: string): Promise<Page> => {
   if (!b) {
-    b = await launch();
+    b = await launch({ timeout: 0 });
   }
   let _resolve;
   const loadFn = async () => {
     console.log(
-      `加载${url}完成`,
-      isDev && `页面内容: \n ${(await sharedPage.content()).slice(0, 100)}`
+      `\n加载 ${url} 完成`,
+      isDev &&
+        `页面内容: \n ${(
+          await sharedPage.$eval("title", ele => ele.innerHTML)
+        ).slice(0, 30)}`
     );
 
     _resolve(sharedPage);
@@ -21,7 +24,9 @@ export const loadUrl = async (url: string): Promise<Page> => {
     sharedPage = await b.newPage();
   }
   sharedPage.once("load", loadFn);
-  await sharedPage.goto(url);
+  sharedPage.goto(url).catch(err => {
+    _resolve(sharedPage);
+  });
 
   return await new Promise(resolve => {
     _resolve = resolve;

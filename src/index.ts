@@ -1,5 +1,8 @@
 import { loadUrl } from "./pupppeteer";
 import DotEnv from "dotenv";
+import PDFDocument from "pdfkit";
+import fs from "fs";
+import { saveCachePath, resolvePath, saveFilePath } from "./file";
 
 DotEnv.config();
 
@@ -11,13 +14,25 @@ function getUrl(uri) {
 }
 
 async function loadPage(bookPath: string, pageNum: number) {
-  const pagePath = bookPath.replace(".", `_p${pageNum}.`);
-  const page = await loadUrl(getUrl(pagePath));
-  const imgUrl = await page.$eval(".img-fluid.show-pic", img =>
-    img.getAttribute("src")
+  const imgPath = saveCachePath(
+    bookPath.replace(/\//g, "-") + "-" + pageNum + ".png"
   );
 
-  console.log(imgUrl);
+  if (fs.existsSync(imgPath)) {
+    return imgPath;
+  }
+  const pagePath = bookPath.replace(".", `_p${pageNum}.`);
+  const page = await loadUrl(getUrl(pagePath));
+  const imgUrl = await page.$(".img-fluid.show-pic");
+
+  if (!imgUrl) return "";
+
+  await imgUrl?.screenshot({
+    path: imgPath,
+    omitBackground: true
+  });
+
+  return imgPath;
 }
 
 /**
@@ -32,9 +47,26 @@ async function loadBook(path: string) {
 
   if (allBookPage === undefined) return;
 
+  const bookPDF = new PDFDocument();
+
+  bookPDF.pipe(
+    fs.createWriteStream(
+      saveFilePath(resolvePath("../output", `${path.replace(/\//g, "-")}.pdf`))
+    )
+  );
+  bookPDF.text(path);
+
   for (let index = 1; index <= allBookPage; index++) {
-    await loadPage(path, index);
+    const imagePath = await loadPage(path, index);
+    if (!imagePath) break;
+    bookPDF.addPage().image(imagePath, {
+      align: "center",
+      valign: "center",
+      width: 450
+    });
   }
+
+  bookPDF.save().end();
 }
 
 (async () => {
