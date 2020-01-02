@@ -2,7 +2,12 @@ import { loadUrl } from "./pupppeteer";
 import DotEnv from "dotenv";
 import PDFDocument from "pdfkit";
 import fs from "fs";
-import { saveCachePath, resolvePath, saveFilePath } from "./file";
+import {
+  saveCachePath,
+  resolvePath,
+  saveFilePath,
+  execInChildProcess
+} from "./file";
 
 DotEnv.config();
 
@@ -23,14 +28,17 @@ async function loadPage(bookPath: string, pageNum: number) {
   }
   const pagePath = bookPath.replace(".", `_p${pageNum}.`);
   const page = await loadUrl(getUrl(pagePath));
-  const imgUrl = await page.$(".img-fluid.show-pic");
 
-  if (!imgUrl) return "";
-
-  await imgUrl?.screenshot({
-    path: imgPath,
-    omitBackground: true
-  });
+  try {
+    const img = await page.$(".img-fluid.show-pic");
+    if (!img) return "";
+    await img?.screenshot({
+      path: imgPath,
+      omitBackground: true
+    });
+  } catch (error) {
+    return "";
+  }
 
   return imgPath;
 }
@@ -41,22 +49,33 @@ async function loadPage(bookPath: string, pageNum: number) {
  */
 async function loadBook(path: string) {
   const page = await loadUrl(getUrl(path));
-  const allBookPage: number | undefined = await (
-    await page.$(".form-control.vg-page-selector")
-  )?.$$eval("option", list => list.length);
+  let allBookPage: number | undefined;
+  let title: string = "";
+  try {
+    allBookPage = await (
+      await page.$(".form-control.vg-page-selector")
+    )?.$$eval("option", list => list.length);
+
+    title = await page.$eval("title", ele => ele.innerHTML);
+  } catch (error) {
+    allBookPage = undefined;
+  }
 
   if (allBookPage === undefined) return;
 
-  const bookPDF = new PDFDocument();
+  const pdfPath = saveFilePath(resolvePath("../output", `${title}.pdf`));
 
-  bookPDF.pipe(
-    fs.createWriteStream(
-      saveFilePath(resolvePath("../output", `${path.replace(/\//g, "-")}.pdf`))
-    )
-  );
+  if (fs.existsSync(pdfPath)) return;
+
+  const pdfCachePath = saveFilePath(resolvePath("../output", `.${title}.pdf`));
+
+  const bookPDF = new PDFDocument();
+  bookPDF.pipe(fs.createWriteStream(pdfCachePath));
   bookPDF.text(path);
 
-  for (let index = 1; index <= allBookPage; index++) {
+  let index = 1;
+
+  for (; index <= allBookPage; index++) {
     const imagePath = await loadPage(path, index);
     if (!imagePath) break;
     bookPDF.addPage().image(imagePath, {
@@ -66,7 +85,18 @@ async function loadBook(path: string) {
     });
   }
 
-  bookPDF.save().end();
+  if (index < allBookPage) {
+    execInChildProcess(`rm '${pdfCachePath}'`);
+    // retry
+    loadBook(path);
+  } else {
+    bookPDF.save().end();
+    // 删除缓存文件？
+    execInChildProcess(
+      `rm ${saveCachePath(path.replace(/\//g, "-") + "-*.png")}`
+    );
+    execInChildProcess(`mv '${pdfCachePath}' '${pdfPath}'`);
+  }
 }
 
 (async () => {
@@ -89,6 +119,6 @@ async function loadBook(path: string) {
   );
 
   for (const book of pids) {
-    await loadBook(book);
+    loadBook(book);
   }
 })();
