@@ -51,14 +51,6 @@ export const loadUrl = async (url: string): Promise<[Page, SharedPage]> => {
     } finally {
       _resolve();
     }
-
-    loggy(
-      "实例状态" +
-        sharedPages
-          .map(pa => pa?.status)
-          .filter(v => !!v)
-          .join("_")
-    );
   };
 
   if (!!ins && ins.status === "free") {
