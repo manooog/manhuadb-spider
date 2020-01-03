@@ -35,27 +35,30 @@ async function getFreePageIns(): Promise<SharedPage | undefined> {
   return page;
 }
 
-export const loadUrl = async (url: string): Promise<Page> => {
+export const loadUrl = async (url: string): Promise<[Page, SharedPage]> => {
   await makeSureBrowser();
   let sharedPage: Page;
   let _resolve;
   let loadResult: boolean = true;
   const ins = await getFreePageIns();
+  const _timeStart = +new Date();
   const loadFn = async () => {
-    (ins as SharedPage).status = "free";
     if (!loadResult) return;
     try {
-      loggy(
-        `\n使用${ins?.id}实例加载 ${url} 完成\n${await sharedPage.$eval(
-          "title",
-          ele => ele.innerHTML
-        )}`
-      );
+      loggy(`使用${ins?.id}实例加载 ${url} 完成\n${await sharedPage.title()}`);
     } catch (error) {
       // err but don't know why.
     } finally {
-      _resolve(sharedPage);
+      _resolve();
     }
+
+    loggy(
+      "实例状态" +
+        sharedPages
+          .map(pa => pa?.status)
+          .filter(v => !!v)
+          .join("_")
+    );
   };
 
   if (!!ins && ins.status === "free") {
@@ -70,18 +73,22 @@ export const loadUrl = async (url: string): Promise<Page> => {
   sharedPage
     .goto(url, {
       // if set 0, the instace will not get free again.
-      timeout: 30 * 1000
+      timeout: Number(process.env.TIMEOUT || 30) * 1000
     })
     .catch(err => {
       loggy(
-        `\n使用${ins.id}加载 ${url} 失败\n${err.toString().slice(0, 50)}...`,
+        `使用${ins.id}加载 ${url} 失败\n${err.toString().slice(0, 50)}...`,
         { type: "error", always: true }
       );
       loadResult = false;
-      _resolve(sharedPage);
+      _resolve();
     });
 
   return await new Promise(resolve => {
-    _resolve = resolve;
+    _resolve = () => {
+      const deltaTime = (+new Date() - _timeStart) / 1000 + "s";
+      loggy(`耗时${deltaTime}`, { always: true });
+      resolve([sharedPage, ins]);
+    };
   });
 };

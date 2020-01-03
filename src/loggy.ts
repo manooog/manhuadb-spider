@@ -14,6 +14,8 @@ export function loggy(str: string, _opt?: Options) {
     _opt
   );
 
+  str = `[${new Date().toLocaleTimeString()}]` + str + "\n";
+
   const _loggy = () => {
     console[opt.type || "log"](str);
   };

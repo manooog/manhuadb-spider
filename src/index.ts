@@ -8,6 +8,7 @@ import {
   saveFilePath,
   execInChildProcess
 } from "./file";
+import { loggy } from "./loggy";
 
 DotEnv.config();
 
@@ -27,7 +28,7 @@ async function loadPage(bookPath: string, pageNum: number) {
     return imgPath;
   }
   const pagePath = bookPath.replace(".", `_p${pageNum}.`);
-  const page = await loadUrl(getUrl(pagePath));
+  const [page, ins] = await loadUrl(getUrl(pagePath));
 
   try {
     const img = await page.$(".img-fluid.show-pic");
@@ -36,6 +37,7 @@ async function loadPage(bookPath: string, pageNum: number) {
       path: imgPath,
       omitBackground: true
     });
+    ins.status = "free";
   } catch (error) {
     return "";
   }
@@ -48,20 +50,28 @@ async function loadPage(bookPath: string, pageNum: number) {
  * @param path eg: "/manhua/159/69_797.html"
  */
 async function loadBook(path: string) {
-  const page = await loadUrl(getUrl(path));
+  const [page, ins] = await loadUrl(getUrl(path));
   let allBookPage: number | undefined;
   let title: string = "";
+  const retry = (reason: string) => {
+    loggy(`重试,${path + "原因：" + reason}`);
+    loadBook(path);
+  };
   try {
     allBookPage = await (
       await page.$(".form-control.vg-page-selector")
     )?.$$eval("option", list => list.length);
 
-    title = await page.$eval("title", ele => ele.innerHTML);
+    title = await page.title();
+    // release ins
+    ins.status = "free";
   } catch (error) {
     allBookPage = undefined;
   }
 
-  if (allBookPage === undefined) return;
+  if (allBookPage === undefined) {
+    return retry("没有获取到画册的页数");
+  }
 
   const pdfPath = saveFilePath(resolvePath("../output", `${title}.pdf`));
 
@@ -78,17 +88,21 @@ async function loadBook(path: string) {
   for (; index <= allBookPage; index++) {
     const imagePath = await loadPage(path, index);
     if (!imagePath) break;
-    bookPDF.addPage().image(imagePath, {
-      align: "center",
-      valign: "center",
-      width: 450
-    });
+    try {
+      bookPDF.addPage().image(imagePath, {
+        align: "center",
+        valign: "center",
+        width: 450
+      });
+    } catch (error) {
+      loggy(`读取 ${imagePath} 出现异常`);
+      execInChildProcess(`rm ${imagePath}`);
+      break;
+    }
   }
 
   if (index < allBookPage) {
-    execInChildProcess(`rm '${pdfCachePath}'`);
-    // retry
-    loadBook(path);
+    return retry(`加载画册第${index}页的时候出现异常`);
   } else {
     bookPDF.save().end();
     // 删除缓存文件？
@@ -102,7 +116,7 @@ async function loadBook(path: string) {
 (async () => {
   if (process.env.ID === undefined) return;
   const mainUrl = getUrl(`/manhua/${process.env.ID}`);
-  const mainPage = await loadUrl(mainUrl);
+  const [mainPage, ins] = await loadUrl(mainUrl);
   // 所有册的id
   let pids: string[] = await mainPage.$$eval(
     ".active .links-of-books.num_div .sort_div a",
@@ -117,6 +131,8 @@ async function loadBook(path: string) {
       return pids;
     }
   );
+
+  ins.status = "free";
 
   for (const book of pids) {
     loadBook(book);
