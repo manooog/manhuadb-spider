@@ -37,7 +37,7 @@ async function loadPage(bookPath: string, pageNum: number): Promise<string> {
       omitBackground: true
     });
   } catch (error) {
-    imgPath = ''
+    imgPath = "";
   } finally {
     ins.status = "free";
   }
