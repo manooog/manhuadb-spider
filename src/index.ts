@@ -19,8 +19,8 @@ function getUrl(uri) {
   return domain + uri;
 }
 
-async function loadPage(bookPath: string, pageNum: number) {
-  const imgPath = saveCachePath(
+async function loadPage(bookPath: string, pageNum: number): Promise<string> {
+  let imgPath = saveCachePath(
     bookPath.replace(/\//g, "-") + "-" + pageNum + ".png"
   );
 
@@ -32,14 +32,14 @@ async function loadPage(bookPath: string, pageNum: number) {
 
   try {
     const img = await page.$(".img-fluid.show-pic");
-    if (!img) return "";
     await img?.screenshot({
       path: imgPath,
       omitBackground: true
     });
-    ins.status = "free";
   } catch (error) {
-    return "";
+    imgPath = ''
+  } finally {
+    ins.status = "free";
   }
 
   return imgPath;
