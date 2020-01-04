@@ -49,13 +49,13 @@ async function loadPage(bookPath: string, pageNum: number) {
  *
  * @param path eg: "/manhua/159/69_797.html"
  */
-async function loadBook(path: string) {
+async function loadBook(path: string): Promise<boolean> {
   const [page, ins] = await loadUrl(getUrl(path));
   let allBookPage: number | undefined;
   let title: string = "";
   const retry = (reason: string) => {
     loggy(`重试,${path + "原因：" + reason}`);
-    loadBook(path);
+    return false;
   };
   try {
     allBookPage = await (
@@ -69,13 +69,11 @@ async function loadBook(path: string) {
     allBookPage = undefined;
   }
 
-  if (allBookPage === undefined) {
-    return retry("没有获取到画册的页数");
-  }
+  if (allBookPage === undefined) return retry("没有获取到画册的页数");
 
   const pdfPath = saveFilePath(resolvePath("../output", `${title}.pdf`));
 
-  if (fs.existsSync(pdfPath)) return;
+  if (fs.existsSync(pdfPath)) return true;
 
   const pdfCachePath = saveFilePath(resolvePath("../output", `.${title}.pdf`));
 
@@ -101,22 +99,24 @@ async function loadBook(path: string) {
     }
   }
 
-  if (index < allBookPage) {
-    return retry(`加载画册第${index}页的时候出现异常`);
-  } else {
-    bookPDF.save().end();
-    // 删除缓存文件？
-    execInChildProcess(
-      `rm ${saveCachePath(path.replace(/\//g, "-") + "-*.png")}`
-    );
-    execInChildProcess(`mv '${pdfCachePath}' '${pdfPath}'`);
-  }
+  if (index < allBookPage) return retry(`加载画册第${index}页的时候出现异常`);
+
+  bookPDF.save().end();
+  // 删除缓存文件？
+  execInChildProcess(
+    `rm ${saveCachePath(path.replace(/\//g, "-") + "-*.png")}`
+  );
+  execInChildProcess(`mv '${pdfCachePath}' '${pdfPath}'`);
+  loggy(`漫画${path}下载完成`, { always: true });
+
+  return true;
 }
 
 (async () => {
   if (process.env.ID === undefined) return;
   const mainUrl = getUrl(`/manhua/${process.env.ID}`);
   const [mainPage, ins] = await loadUrl(mainUrl);
+  type status = "pending" | "done" | "error";
   // 所有册的id
   let pids: string[] = await mainPage.$$eval(
     ".active .links-of-books.num_div .sort_div a",
@@ -132,9 +132,28 @@ async function loadBook(path: string) {
     }
   );
 
+  type Book = { status: status; path: string };
+
+  if (pids.length === 0) return;
+
+  let books: Book[] = pids.map<Book>(p => ({ status: "error", path: p }));
+
   ins.status = "free";
 
-  for (const book of pids) {
-    loadBook(book);
-  }
+  const timer = setInterval(() => {
+    const errorBook = books.filter(book => book.status === "error");
+    if (errorBook.length > 0) {
+      for (const book of errorBook) {
+        book.status = "pending";
+        loadBook(book.path).then(res => {
+          book.status = res ? "done" : "error";
+        });
+      }
+    }
+    if (books.every(book => book.status === "done")) {
+      clearInterval(timer);
+      loggy("漫画下载完成", { always: true });
+      process.exit(0);
+    }
+  }, 1000);
 })();
